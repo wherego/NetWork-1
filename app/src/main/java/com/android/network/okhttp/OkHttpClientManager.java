@@ -105,11 +105,24 @@ public class OkHttpClientManager {
      * @param params post的参数
      * @return
      */
-    private Response post(String url, Param... params) throws IOException
+    private Response postForResponse(String url, Param... params) throws IOException
     {
         Request request = buildPostRequest(url, params);
         Response response = mOkHttpClient.newCall(request).execute();
         return response;
+    }
+
+    /**
+     * 同步的Post请求
+     *
+     * @param url
+     * @param params post的参数
+     * @return
+     */
+    private String postForString(String url, Param... params) throws IOException
+    {
+        Response response = postForResponse(url , params);
+        return response.body().toString();
     }
 
     /*=================================================================================================================*/
