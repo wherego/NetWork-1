@@ -5,16 +5,24 @@ import android.os.Looper;
 
 import com.google.gson.Gson;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.lang.reflect.ParameterizedType;
+import java.net.FileNameMap;
+import java.net.URLConnection;
 import java.util.Map;
 import java.util.Set;
 
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.FormBody;
+import okhttp3.Headers;
+import okhttp3.MediaType;
+import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -125,6 +133,144 @@ public class OkHttpClientManager {
         return response.body().toString();
     }
 
+    /**
+     * 异步的post请求
+     *
+     * @param url
+     * @param callback
+     * @param params
+     */
+    private void postAsyn(String url, final ResultCallback callback, Param... params)
+    {
+        Request request = buildPostRequest(url, params);
+        deliveryResult(callback, request);
+    }
+
+    /**
+     * 异步的post请求
+     *
+     * @param url
+     * @param callback
+     * @param params
+     */
+    private void postAsyn(String url, final ResultCallback callback, Map<String , String> params)
+    {
+        Param[] param = map2Params(params);
+        Request request = buildPostRequest(url, param);
+        deliveryResult(callback, request);
+    }
+
+    /**
+     * 同步基于post的文件上传
+     *
+     * @param params
+     * @return
+     */
+    private Response post(String url, File[] files, String[] fileKeys, Param... params) throws IOException
+    {
+        Request request = buildMultipartFormRequest(url, files, fileKeys, params);
+
+        return mOkHttpClient.newCall(request).execute();
+    }
+
+    private Response post(String url, File file, String fileKey) throws IOException
+    {
+        Request request = buildMultipartFormRequest(url, new File[]{file}, new String[]{fileKey}, null);
+        return mOkHttpClient.newCall(request).execute();
+    }
+
+    private Response post(String url, File file, String fileKey, Param... params) throws IOException
+    {
+        Request request = buildMultipartFormRequest(url, new File[]{file}, new String[]{fileKey}, params);
+        return mOkHttpClient.newCall(request).execute();
+    }
+
+    /**
+     * 异步基于post的文件上传
+     *
+     * @param url
+     * @param callback
+     * @param files
+     * @param fileKeys
+     * @throws IOException
+     */
+    private void postAsyn(String url, ResultCallback callback, File[] files, String[] fileKeys, Param... params) throws IOException
+    {
+        Request request = buildMultipartFormRequest(url, files, fileKeys, params);
+        deliveryResult(callback, request);
+    }
+
+    /**
+     * 异步基于post的文件上传，单文件不带参数上传
+     *
+     * @param url
+     * @param callback
+     * @param file
+     * @param fileKey
+     * @throws IOException
+     */
+    private void postAsyn(String url, ResultCallback callback, File file, String fileKey) throws IOException
+    {
+        Request request = buildMultipartFormRequest(url, new File[]{file}, new String[]{fileKey}, null);
+        deliveryResult(callback, request);
+    }
+
+    /**
+     * 异步下载文件
+     *
+     * @param url
+     * @param destFileDir 本地文件存储的文件夹
+     * @param callback
+     */
+    private void downloadAsyn(final String url, final String destFileDir, final ResultCallback callback)
+    {
+        final Request request = new Request.Builder()
+                .url(url)
+                .build();
+        final Call call = mOkHttpClient.newCall(request);
+        call.enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                sendFailedStringCallback(call.request() , e , callback);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                InputStream inputStream = null;
+                byte[] buf = new byte[2048];
+                int len = 0;
+                FileOutputStream fileOutputStream = null ;
+                try{
+                    inputStream = response.body().byteStream();
+                    File file = new File(destFileDir , getFileName(url));
+                    fileOutputStream = new FileOutputStream(file);
+                    while((len = inputStream.read())!= -1){
+                        fileOutputStream.write(buf , 0 , len);
+                    }
+                    fileOutputStream.close();
+                    sendSuccessResultCallback(file.getAbsolutePath() , callback);
+                }catch (IOException e){
+                    sendFailedStringCallback(request , e , callback);
+                }finally {
+                    try{
+                        if (inputStream != null){
+                            inputStream.close();
+                        }
+                    }catch (IOException e){
+
+                    }
+                    try{
+                        if (fileOutputStream != null){
+                            fileOutputStream.close();
+                        }
+                    }catch (IOException e){
+
+                    }
+                }
+            }
+        });
+    }
+
     /*=================================================================================================================*/
 
 
@@ -154,6 +300,73 @@ public class OkHttpClientManager {
                 .post(requestBody)
                 .build();
     }
+
+    private String getFileName(String path)
+    {
+        int separatorIndex = path.lastIndexOf("/");
+        return (separatorIndex < 0) ? path : path.substring(separatorIndex + 1, path.length());
+    }
+
+
+    /**
+     * build form through params
+     * @param url
+     * @param files
+     * @param fileKeys
+     * @param params
+     * @return
+     */
+    private Request buildMultipartFormRequest(String url, File[] files,
+                                              String[] fileKeys, Param[] params)
+    {
+        params = validateParam(params);
+
+        MultipartBody.Builder builder = new MultipartBody.Builder()
+                .setType(MultipartBody.FORM);
+
+        for (Param param : params)
+        {
+            builder.addPart(Headers.of("Content-Disposition", "form-data; name=\"" + param.key + "\""),
+                    RequestBody.create(null, param.value));
+        }
+        if (files != null)
+        {
+            RequestBody fileBody = null;
+            for (int i = 0; i < files.length; i++)
+            {
+                File file = files[i];
+                String fileName = file.getName();
+                fileBody = RequestBody.create(MediaType.parse(guessMimeType(fileName)), file);
+                //TODO 根据文件名设置contentType
+                builder.addPart(Headers.of("Content-Disposition",
+                        "form-data; name=\"" + fileKeys[i] + "\"; filename=\"" + fileName + "\""),
+                        fileBody);
+            }
+        }
+
+        RequestBody requestBody = builder.build();
+        return new Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build();
+    }
+
+    /**
+     * judge content Type by  file-path
+     * @param path
+     * @return
+     */
+    private String guessMimeType(String path)
+    {
+        FileNameMap fileNameMap = URLConnection.getFileNameMap();
+        String contentTypeFor = fileNameMap.getContentTypeFor(path);
+        if (contentTypeFor == null)
+        {
+            contentTypeFor = "application/octet-stream";
+        }
+        return contentTypeFor;
+    }
+
 
     /**
      * 派发请求结果
