@@ -1,8 +1,12 @@
 package com.android.network.okhttp;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Handler;
 import android.os.Looper;
+import android.widget.ImageView;
 
+import com.android.network.okhttp.utils.ImageUtils;
 import com.google.gson.Gson;
 
 import java.io.File;
@@ -271,6 +275,75 @@ public class OkHttpClientManager {
         });
     }
 
+    /**
+     * 加载图片
+     *
+     * @param view
+     * @param url
+     * @throws IOException
+     */
+    private void displayImage(final ImageView view, final String url, final int errorResId)
+    {
+        final Request request = new Request.Builder()
+                .url(url)
+                .build();
+        Call call = mOkHttpClient.newCall(request);
+        call.enqueue(new Callback()
+        {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                setErrorResId(view, errorResId);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                InputStream is = null;
+                try
+                {
+                    is = response.body().byteStream();
+                    ImageUtils.ImageSize actualImageSize = ImageUtils.getImageSize(is);
+                    ImageUtils.ImageSize imageViewSize = ImageUtils.getImageViewSize(view);
+                    int inSampleSize = ImageUtils.calculateInSampleSize(actualImageSize, imageViewSize);
+                    try
+                    {
+                        is.reset();
+                    } catch (IOException e)
+                    {
+                        response = getAsync(url);
+                        is = response.body().byteStream();
+                    }
+
+                    BitmapFactory.Options ops = new BitmapFactory.Options();
+                    ops.inJustDecodeBounds = false;
+                    ops.inSampleSize = inSampleSize;
+                    final Bitmap bm = BitmapFactory.decodeStream(is, null, ops);
+                    mDelivery.post(new Runnable()
+                    {
+                        @Override
+                        public void run()
+                        {
+                            view.setImageBitmap(bm);
+                        }
+                    });
+                } catch (Exception e)
+                {
+                    setErrorResId(view, errorResId);
+
+                } finally
+                {
+                    if (is != null) try
+                    {
+                        is.close();
+                    } catch (IOException e)
+                    {
+                        e.printStackTrace();
+                    }
+                }
+            }
+
+        });
+    }
+
     /*=================================================================================================================*/
 
 
@@ -307,6 +380,17 @@ public class OkHttpClientManager {
         return (separatorIndex < 0) ? path : path.substring(separatorIndex + 1, path.length());
     }
 
+    private void setErrorResId(final ImageView view, final int errorResId)
+    {
+        mDelivery.post(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                view.setImageResource(errorResId);
+            }
+        });
+    }
 
     /**
      * build form through params
