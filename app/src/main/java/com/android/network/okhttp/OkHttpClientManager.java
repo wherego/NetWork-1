@@ -558,4 +558,23 @@ public class OkHttpClientManager {
         return res;
     }
 
+    /**
+     * 将键值对类型参数化为可变参数
+     * @param params
+     * @return
+     */
+    private Param[] empty(Map<String, String> params)
+    {
+        if (params == null) return new Param[0];
+        int size = params.size();
+        Param[] res = new Param[size];
+        Set<Map.Entry<String, String>> entries = params.entrySet();
+        int i = 0;
+        for (Map.Entry<String, String> entry : entries)
+        {
+            res[i++] = new Param(entry.getKey(), entry.getValue());
+        }
+        return res;
+    }
+
 }
